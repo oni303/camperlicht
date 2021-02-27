@@ -9,10 +9,10 @@
 
 
 uint32_t relaiSwitchMapping[NUMSWITCHMODULES][NUMSWITCHSPERMODULES] = {
-    {
-	0b00000000000000000,
-	0b00000000000000000,
-	0b00000000000000000,
+    {  //relay3 relai2 relai1
+	0b00000000000000000, //switch1
+	0b00000000000000000, //switch2
+	0b00000000000000000, //switch3
 	0b00000000000000000,
 	0b00000000000000000,
 	0b00000000000000000,
@@ -29,9 +29,9 @@ uint32_t relaiSwitchMapping[NUMSWITCHMODULES][NUMSWITCHSPERMODULES] = {
 	0b00000000000000000
     },
     {
-	0b00000000000000000,
-	0b00000000000000000,
-	0b00000000000000000,
+	0b00000000000000101,
+	0b00000000000000010,
+	0b00000000000000100,
 	0b00000000000000000,
 	0b00000000000000000,
 	0b00000000000000000,
@@ -52,6 +52,11 @@ int enablePin = 19;
 uint32_t switchStates = 0;
 uint32_t relaiStates = 0;
 
+typedef struct {
+    uint8_t moduleId;
+    uint32_t switchStates;
+} message_t;
+
 void setup()
 {
   Serial.begin(9600);            // initialize serial at baudrate 9600:
@@ -63,15 +68,22 @@ void setup()
   digitalWrite(enablePin, LOW);
   delay(10); 
 }
+
 void loop()
 {
+    message_t message;
     while (Serial.available() > 0){
-	uint8_t moduleId = getMessage();
-	if (switchStates == 0){ // ignore empty messages
+	message = getMessage();
+	if (message.switchStates == 0){ // ignore empty messages
 	    break;
 	}
+	Serial.print("in ");        
+	Serial.print(message.moduleId);    
+	Serial.print(" ");        
+        printBits(message.switchStates);
+        uint32_t relaisToEffect = getRelaisToEffect(message, relaiStates);
 
-	relaiStates ^= switchStates;
+	relaiStates ^= relaisToEffect;
 	Serial.print("out ");        
 	for (uint8_t i = PINOFFSET; i < NUMOUTPUT ; i++){
 	    if ( relaiStates & (1 << i - PINOFFSET) ){
@@ -87,10 +99,44 @@ void loop()
     }
 }
 
-uint8_t getMessage(void)
+void printBits(uint32_t bits)
 {
-    switchStates = Serial.parseInt();
-    uint8_t moduleId = switchStates >> ADDRESSOFFSET;
-    switchStates = switchStates & 0x3ffff;
-    return moduleId;
+	for (uint8_t i = 0; i <  NUMSWITCHSPERMODULES ; i++){
+	    if ( bits & (1 << i) ){
+		Serial.print("1");    
+	    }else{
+		Serial.print("0");     
+	    }
+	}
+	Serial.println(" ");          
+}
+
+uint32_t getRelaisToEffect(message_t &m, uint32_t relaiStates)
+{
+    uint32_t toEffect = 0;
+
+
+    printBits(m.switchStates);
+    for (uint8_t switchNum = 0; switchNum < NUMSWITCHSPERMODULES; switchNum++){
+        if (m.switchStates & (1 << switchNum)){
+            // if only some of the relais of this switch are on, we trun all off 
+            uint32_t onRelais = relaiStates & relaiSwitchMapping[m.moduleId][switchNum];
+            if (onRelais != 0){
+                toEffect |= onRelais;
+            } else {
+                toEffect |= relaiSwitchMapping[m.moduleId][switchNum];
+            }
+        }
+    }    
+    return toEffect;
+}
+
+message_t getMessage(void)
+{
+    message_t m;
+    uint32_t switchStates = Serial.parseInt();
+    m.moduleId = switchStates >> ADDRESSOFFSET;
+    m.moduleId -= 1;
+    m.switchStates = switchStates & 0x3ffff;
+    return m;
 }
